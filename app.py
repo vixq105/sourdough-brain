@@ -10,7 +10,10 @@ GENAI_API_KEY = "AIzaSyCGk8FcySmCgnrteDdMdSHSWFPIErBvauM"
 # ====================================================
 
 genai.configure(api_key=GENAI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash-latest')
+
+# ใช้ชื่อรุ่นที่ระบุรหัสชัดเจน (เสถียรที่สุด)
+model_name = 'gemini-1.5-flash-001'
+model = genai.GenerativeModel(model_name)
 
 app = Flask(__name__)
 
@@ -30,28 +33,22 @@ def analyze():
             return "Error|0|No Image Sent"
 
         # === 🛠️ ส่วนซ่อมแซมข้อมูล (Auto-Repair) ===
-        # ลบหัวกระดาษทิ้งถ้ามี (data:image/jpeg;base64,)
         if "," in image_data:
             image_data = image_data.split(",")[1]
-            
-        # แก้ไข Space ที่อาจเพี้ยนมาจากการส่ง
         image_data = image_data.replace(' ', '+')
-
-        # เติมเครื่องหมาย = ที่หายไปตอนท้าย (Padding Fix)
         missing_padding = len(image_data) % 4
         if missing_padding:
             image_data += '=' * (4 - missing_padding)
         # =======================================
 
-        # 2. แปลงรหัสกลับเป็นรูปภาพ
+        # 2. แปลงรูปภาพ
         try:
             image_bytes = base64.b64decode(image_data)
             image = Image.open(io.BytesIO(image_bytes))
         except Exception as img_err:
-            print(f"Image Decode Error: {img_err}")
             return "Error|0|Image Corrupted"
 
-        # 3. ส่งให้ Gemini ดู
+        # 3. สั่ง Gemini
         prompt = f"""
         You are a sourdough expert. Analyze this image of a starter.
         Current Environment: Temperature {temp}°C, Humidity {hum}%.
@@ -64,19 +61,31 @@ def analyze():
         ShortAdvice: One short sentence advice.
         """
         
-        response = model.generate_content([prompt, image])
-        text_response = response.text.strip()
-        
-        # ล้าง Format ที่ไม่จำเป็น
-        text_response = text_response.replace('```', '').replace('python', '').strip()
-        
-        print(f"AI Says: {text_response}")
-        return text_response
+        try:
+            response = model.generate_content([prompt, image])
+            text_response = response.text.strip()
+            text_response = text_response.replace('```', '').replace('python', '').strip()
+            print(f"AI Says: {text_response}")
+            return text_response
+            
+        except Exception as api_err:
+            # 🚨 ถ้ายัง Error เรื่องชื่อรุ่น ให้ลองค้นหาชื่อรุ่นที่มีอยู่จริง
+            error_str = str(api_err)
+            if "404" in error_str or "not found" in error_str:
+                print("Model not found, listing available models...")
+                available = []
+                for m in genai.list_models():
+                    if 'generateContent' in m.supported_generation_methods:
+                        available.append(m.name)
+                # ส่งรายชื่อรุ่นกลับไปโชว์ที่หน้าจอ ESP32 เลย จะได้รู้ว่าควรใช้อันไหน
+                suggested_models = ", ".join(available[:2]) # เอามาแค่ 2 อันแรก
+                return f"Model Error|0|Try using: {suggested_models}"
+            else:
+                raise api_err
 
     except Exception as e:
-        print(f"Server Error: {str(e)}")
+        print(f"System Error: {str(e)}")
         return f"System Error|0|{str(e)}"
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
-
