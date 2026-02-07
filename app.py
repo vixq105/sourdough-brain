@@ -10,7 +10,7 @@ GENAI_API_KEY = "AIzaSyCGk8FcySmCgnrteDdMdSHSWFPIErBvauM"
 # ====================================================
 
 genai.configure(api_key=GENAI_API_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
 app = Flask(__name__)
 
@@ -79,3 +79,4 @@ def analyze():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
+
