@@ -12,7 +12,7 @@ GENAI_API_KEY = "AIzaSyCGk8FcySmCgnrteDdMdSHSWFPIErBvauM"
 genai.configure(api_key=GENAI_API_KEY)
 
 # ใช้ชื่อรุ่นที่ระบุรหัสชัดเจน (เสถียรที่สุด)
-model_name = 'gemini-1.5-flash-001'
+model_name = 'gemini-2.5-pro'
 model = genai.GenerativeModel(model_name)
 
 app = Flask(__name__)
@@ -89,3 +89,4 @@ def analyze():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
+
