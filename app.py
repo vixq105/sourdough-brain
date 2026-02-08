@@ -58,6 +58,7 @@ def analyze():
         except Exception as e:
              return f"Error|0|Model Setup Fail"
 
+        # 3. สั่ง Gemini ให้วิเคราะห์ (ปรับคำสั่งให้สั้นลง)
         prompt = f"""
         You are a sourdough expert. Analyze this image of a starter.
         Current Environment: Temperature {temp}°C, Humidity {hum}%.
@@ -67,7 +68,7 @@ def analyze():
 
         Status options: 'Feeding Needed', 'Rising', 'Peak/Ready', 'Over-fermented', 'Moldy/Bad'.
         TimeRemaining: Estimate minutes until ready (put 0 if ready or bad).
-        ShortAdvice: One short sentence advice.
+        ShortAdvice: ONE SHORT SENTENCE. Max 6 words. No symbols.
         """
         
         print(f"Sending to model: {model_name}")
@@ -99,3 +100,4 @@ def analyze():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
+
