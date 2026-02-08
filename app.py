@@ -7,7 +7,7 @@ from flask import Flask, request
 
 app = Flask(__name__)
 
-# --- 1. ตั้งค่ากุญแจต่างๆ จาก Render ---
+# --- 1. ตั้งค่ากุญแจ (ดึงจาก Render) ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 LINE_CHANNEL_TOKEN = os.environ.get("LINE_CHANNEL_TOKEN")
 LINE_USER_ID = os.environ.get("LINE_USER_ID")
@@ -16,13 +16,13 @@ LINE_USER_ID = os.environ.get("LINE_USER_ID")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# โมเดลที่ใช้ (แนะนำ 1.5-flash เพราะเร็วและแม่นยำ)
+# ใช้โมเดลนี้ครับ (ต้องแก้ requirements.txt ก่อนถึงจะใช้ได้)
 MODEL_NAME = 'models/gemini-1.5-flash'
 
 # --- 2. ฟังก์ชันส่ง LINE ---
-def send_line_alert(text_message):
+def send_line_alert(message):
     if not LINE_CHANNEL_TOKEN or not LINE_USER_ID:
-        print("LINE keys missing, skipping notification.")
+        print("LINE keys missing")
         return
 
     url = 'https://api.line.me/v2/bot/message/push'
@@ -30,48 +30,43 @@ def send_line_alert(text_message):
         'Content-Type': 'application/json',
         'Authorization': f'Bearer {LINE_CHANNEL_TOKEN}'
     }
-    
     data = {
         "to": LINE_USER_ID,
-        "messages": [{"type": "text", "text": text_message}]
+        "messages": [{"type": "text", "text": message}]
     }
-
     try:
-        response = requests.post(url, headers=headers, data=json.dumps(data))
-        print(f"LINE Sent: {response.status_code}")
+        requests.post(url, headers=headers, data=json.dumps(data))
+        print("LINE Sent!")
     except Exception as e:
         print(f"LINE Error: {e}")
 
 @app.route('/')
 def home():
-    return f"Sourdough Monitor & LINE Bot is Running! (Model: {MODEL_NAME})"
+    return "Sourdough Monitor is Running!"
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
     print("--- New Request ---")
     
-    # 1. รับรูปภาพจาก ESP32
+    # 1. รับรูป
     if 'imageFile' not in request.files:
-        return "Error|0|No Image Sent"
+        return "Error|0|No Image"
     
     file = request.files['imageFile']
-    
-    # 2. เรียกใช้ Gemini
+
     try:
+        # 2. เรียก AI
         model = genai.GenerativeModel(MODEL_NAME)
         
-        # Prompt สั่งงาน (ให้ตอบแบบฟอร์มเป๊ะๆ เพื่อเอาไปโชว์บนจอ ESP32)
         prompt = """
         Analyze this sourdough starter image.
-        
         Strictly return ONE line in this format using pipe '|' separator:
         Status|TimeRemaining(mins)|ShortAdvice
 
         Status options: Ready, Peak, Hungry, Moldy, Sleepy.
-        TimeRemaining: integer minutes (put 0 if ready/bad).
-        ShortAdvice: Very short advice (max 6 words).
-        
-        Example: Ready|0|Bake immediately!
+        TimeRemaining: integer (0 if ready).
+        ShortAdvice: Max 6 words.
+        Example: Ready|0|Bake now!
         """
         
         response = model.generate_content([
@@ -79,34 +74,32 @@ def analyze():
             {"mime_type": "image/jpeg", "data": file.read()}
         ])
         
-        # คลีนข้อมูลคำตอบ
-        result_text = response.text.strip()
-        result_text = result_text.replace('```', '').replace('\n', '')
-        print(f"AI Says: {result_text}")
+        result = response.text.strip().replace('```', '').replace('\n', '')
+        print(f"AI: {result}")
 
-        # --- 3. ตรรกะการส่ง LINE ---
-        # แยกชิ้นส่วนคำตอบ (เช่น "Ready|0|Bake now")
-        parts = result_text.split('|')
-        status = parts[0].strip() if len(parts) > 0 else ""
-        advice = parts[2].strip() if len(parts) > 2 else ""
-
-        # ส่งไลน์เฉพาะถ้า: พร้อม (Ready), พีค (Peak), หรือ ราขึ้น (Moldy)
-        if "Ready" in status or "Peak" in status or "Moldy" in status:
+        # 3. ส่ง LINE (ถ้าสถานะสำคัญ)
+        # เช็คว่ามีคำว่า Ready, Peak หรือ Moldy ไหม
+        if any(x in result for x in ["Ready", "Peak", "Moldy"]):
             emoji = "🍞"
-            if "Moldy" in status: emoji = "⚠️ อันตราย!"
-            if "Ready" in status or "Peak" in status: emoji = "✅ น้องพร้อมแล้ว!"
+            if "Moldy" in result: emoji = "⚠️ ราขึ้น!"
+            elif "Ready" in result: emoji = "✅ พร้อมแล้ว!"
             
-            line_msg = f"{emoji}\nสถานะ: {status}\nคำแนะนำ: {advice}\n(รีบไปดูที่ตู้ด่วน!)"
-            send_line_alert(line_msg)
-        
-        # ส่งค่ากลับไปให้ ESP32 โชว์บนหน้าจอ
-        return result_text
+            # แยกข้อความเพื่อความสวยงาม
+            parts = result.split('|')
+            status_show = parts[0] if len(parts) > 0 else result
+            
+            msg = f"{emoji}\nสถานะ: {status_show}\n(รีบไปดูที่ตู้ด่วน!)"
+            send_line_alert(msg)
+
+        # ส่งค่ากลับไปโชว์ที่จอ ESP32
+        return result
 
     except Exception as e:
         print(f"Error: {traceback.format_exc()}")
-        # ส่ง Error กลับไปโชว์ที่จอ ESP32 แบบสั้นๆ
-        if "404" in str(e): return "Error|0|Model Not Found"
-        if "429" in str(e): return "Error|0|Quota Exceeded"
+        # จัดการ Error แบบต่างๆ
+        err_msg = str(e)
+        if "404" in err_msg: return "Error|0|Update Requirements!"
+        if "429" in err_msg: return "Error|0|Quota Exceeded"
         return "Error|0|System Fail"
 
 if __name__ == '__main__':
