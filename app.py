@@ -58,7 +58,7 @@ def analyze():
         except Exception as e:
              return f"Error|0|Model Setup Fail"
 
-        # 3. สั่ง Gemini ให้วิเคราะห์ (ปรับคำสั่งให้สั้นลง)
+        # สั่ง Gemini ให้วิเคราะห์ (เวอร์ชันใหม่ บังคับตอบสั้น)
         prompt = f"""
         You are a sourdough expert. Analyze this image of a starter.
         Current Environment: Temperature {temp}°C, Humidity {hum}%.
@@ -100,4 +100,5 @@ def analyze():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
+
 
