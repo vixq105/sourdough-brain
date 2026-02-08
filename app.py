@@ -1,4 +1,4 @@
-import os
+timport os
 import requests
 import json
 import google.generativeai as genai
@@ -49,9 +49,9 @@ def analyze_image():
 
     # --- 3. ให้ Gemini วิเคราะห์ ---
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # เปลี่ยนเป็น 'gemini-pro' เพื่อความชัวร์
+        model = genai.GenerativeModel('gemini-pro') 
         
-        # Prompt สั่งให้ตอบสถานะชัดๆ
         prompt = """
         Analyze this sourdough starter image.
         Classify status strictly as one of: Ready, Peak, Hungry, Moldy, Sleepy.
@@ -88,3 +88,4 @@ def analyze_image():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
+
