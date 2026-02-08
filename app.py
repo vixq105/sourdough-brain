@@ -77,10 +77,20 @@ def analyze():
         
         text_response = text_response.replace('```', '').replace('python', '').replace('text', '').strip()
         
-        if "|" not in text_response:
-            print(f"AI Format Error: {text_response}")
-            # ถ้า AI ตอบผิดฟอร์ม ให้พยายามดึงคำตอบออกมา
-            return f"AI Error|0|{text_response[:50]}"
+        # --- เพิ่มส่วนนี้: หั่นข้อความให้สั้นจู๋ เพื่อกัน ESP32 น็อค ---
+        if "|" in text_response:
+            parts = text_response.split('|')
+            if len(parts) >= 3:
+                status = parts[0]
+                time = parts[1]
+                advice = parts[2]
+                
+                # ตัดให้เหลือแค่ 15 ตัวอักษรพอ (กันเหนียวสุดๆ)
+                if len(advice) > 15:
+                    advice = advice[:15] + "..."
+                
+                text_response = f"{status}|{time}|{advice}"
+        # ----------------------------------------------------
 
         print(f"AI Says: {text_response}")
         return text_response
@@ -100,5 +110,6 @@ def analyze():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
+
 
 
