@@ -50,7 +50,7 @@ def analyze_image():
     # --- 3. ให้ Gemini วิเคราะห์ ---
     try:
         # เปลี่ยนเป็น 'gemini-pro' เพื่อความชัวร์
-        model = genai.GenerativeModel('gemini-pro') 
+        model = genai.GenerativeModel('models/gemini-pro') 
         
         prompt = """
         Analyze this sourdough starter image.
@@ -88,5 +88,6 @@ def analyze_image():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
+
 
 
