@@ -4,16 +4,17 @@ import google.generativeai as genai
 from PIL import Image
 import io
 import base64
+import traceback
 
-# =================ตั้งค่า API KEY ตรงนี้=================
-GENAI_API_KEY = "AIzaSyCGk8FcySmCgnrteDdMdSHSWFPIErBvauM" 
+# ====================================================
+# เปลี่ยนวิธีเรียก Key: ดึงจากตู้เซฟของ Render แทน (ปลอดภัย 100%)
+GENAI_API_KEY = os.environ.get("GENAI_API_KEY")
 # ====================================================
 
 genai.configure(api_key=GENAI_API_KEY)
 
-# ใช้ชื่อรุ่นที่ระบุรหัสชัดเจน (เสถียรที่สุด)
+# ใช้รุ่นนี้ตามที่ระบบแนะนำ
 model_name = 'models/gemini-2.5-flash'
-model = genai.GenerativeModel(model_name)
 
 app = Flask(__name__)
 
@@ -24,7 +25,12 @@ def home():
 @app.route('/analyze', methods=['POST'])
 def analyze():
     try:
-        # 1. รับข้อมูล
+        print("--- Start Request ---")
+        
+        # เช็คว่ามี Key หรือยัง
+        if not GENAI_API_KEY:
+            return "Config Error|0|API Key missing in Render Env"
+
         image_data = request.form.get('image')
         temp = request.form.get('temp', '25')
         hum = request.form.get('hum', '60')
@@ -32,23 +38,26 @@ def analyze():
         if not image_data:
             return "Error|0|No Image Sent"
 
-        # === 🛠️ ส่วนซ่อมแซมข้อมูล (Auto-Repair) ===
-        if "," in image_data:
-            image_data = image_data.split(",")[1]
-        image_data = image_data.replace(' ', '+')
-        missing_padding = len(image_data) % 4
-        if missing_padding:
-            image_data += '=' * (4 - missing_padding)
-        # =======================================
-
-        # 2. แปลงรูปภาพ
+        # แปลงรูปภาพ
         try:
+            if "," in image_data:
+                image_data = image_data.split(",")[1]
+            image_data = image_data.replace(' ', '+')
+            missing_padding = len(image_data) % 4
+            if missing_padding:
+                image_data += '=' * (4 - missing_padding)
+            
             image_bytes = base64.b64decode(image_data)
             image = Image.open(io.BytesIO(image_bytes))
-        except Exception as img_err:
-            return "Error|0|Image Corrupted"
+        except Exception as e:
+            print(f"Image Error: {e}")
+            return f"Error|0|Image Corrupted"
 
-        # 3. สั่ง Gemini
+        try:
+            model = genai.GenerativeModel(model_name)
+        except Exception as e:
+             return f"Error|0|Model Setup Fail"
+
         prompt = f"""
         You are a sourdough expert. Analyze this image of a starter.
         Current Environment: Temperature {temp}°C, Humidity {hum}%.
@@ -61,36 +70,32 @@ def analyze():
         ShortAdvice: One short sentence advice.
         """
         
-        try:
-            response = model.generate_content([prompt, image])
-            text_response = response.text.strip()
-            text_response = text_response.replace('```', '').replace('python', '').strip()
-            print(f"AI Says: {text_response}")
-            return text_response
-            
-        except Exception as api_err:
-            # 🚨 ถ้ายัง Error เรื่องชื่อรุ่น ให้ลองค้นหาชื่อรุ่นที่มีอยู่จริง
-            error_str = str(api_err)
-            if "404" in error_str or "not found" in error_str:
-                print("Model not found, listing available models...")
-                available = []
-                for m in genai.list_models():
-                    if 'generateContent' in m.supported_generation_methods:
-                        available.append(m.name)
-                # ส่งรายชื่อรุ่นกลับไปโชว์ที่หน้าจอ ESP32 เลย จะได้รู้ว่าควรใช้อันไหน
-                suggested_models = ", ".join(available[:2]) # เอามาแค่ 2 อันแรก
-                return f"Model Error|0|Try using: {suggested_models}"
-            else:
-                raise api_err
+        print(f"Sending to model: {model_name}")
+        response = model.generate_content([prompt, image])
+        text_response = response.text.strip()
+        
+        text_response = text_response.replace('```', '').replace('python', '').replace('text', '').strip()
+        
+        if "|" not in text_response:
+            print(f"AI Format Error: {text_response}")
+            # ถ้า AI ตอบผิดฟอร์ม ให้พยายามดึงคำตอบออกมา
+            return f"AI Error|0|{text_response[:50]}"
+
+        print(f"AI Says: {text_response}")
+        return text_response
 
     except Exception as e:
-        print(f"System Error: {str(e)}")
-        return f"System Error|0|{str(e)}"
+        error_msg = str(e)
+        print(f"CRITICAL ERROR: {traceback.format_exc()}")
+        
+        if "403" in error_msg:
+            return "Key Error|0|API Key Invalid or Leaked"
+        if "404" in error_msg:
+            return "Model Error|0|Model not found"
+        if "429" in error_msg:
+            return "Quota Error|0|Too many requests"
+            
+        return f"Sys Error|0|Check Logs"
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
-
-
-
-
-
