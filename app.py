@@ -1,115 +1,90 @@
 import os
-from flask import Flask, request
+import requests
+import json
 import google.generativeai as genai
-from PIL import Image
-import io
-import base64
-import traceback
-
-# ====================================================
-# เปลี่ยนวิธีเรียก Key: ดึงจากตู้เซฟของ Render แทน (ปลอดภัย 100%)
-GENAI_API_KEY = os.environ.get("GENAI_API_KEY")
-# ====================================================
-
-genai.configure(api_key=GENAI_API_KEY)
-
-# ใช้รุ่นนี้ตามที่ระบบแนะนำ
-model_name = 'models/gemini-2.5-flash'
+from flask import Flask, request
 
 app = Flask(__name__)
 
-@app.route('/', methods=['GET'])
+# --- 1. ดึงกุญแจจาก Render ---
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+LINE_USER_ID = os.environ.get("LINE_USER_ID")         # ส่งหาใคร (ID คุณ)
+LINE_CHANNEL_TOKEN = os.environ.get("LINE_CHANNEL_TOKEN") # กุญแจบอท
+
+# --- 2. ฟังก์ชันส่งไลน์ (Messaging API - Text Only) ---
+def send_line_message(text_message):
+    url = 'https://api.line.me/v2/bot/message/push'
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {LINE_CHANNEL_TOKEN}'
+    }
+    
+    # แพ็คข้อมูลใส่กล่อง JSON
+    data = {
+        "to": LINE_USER_ID,
+        "messages": [
+            {
+                "type": "text",
+                "text": text_message
+            }
+        ]
+    }
+
+    try:
+        response = requests.post(url, headers=headers, data=json.dumps(data))
+        print(f"LINE Response: {response.status_code}") # 200 = สำเร็จ
+    except Exception as e:
+        print(f"Error sending LINE: {e}")
+
+@app.route('/')
 def home():
-    return "Sourdough AI Brain is Running!"
+    return "Sourdough Monitor (Line Messaging API) is Running!"
 
 @app.route('/analyze', methods=['POST'])
-def analyze():
+def analyze_image():
+    if 'imageFile' not in request.files:
+        return "No image uploaded", 400
+
+    file = request.files['imageFile']
+
+    # --- 3. ให้ Gemini วิเคราะห์ ---
     try:
-        print("--- Start Request ---")
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
-        # เช็คว่ามี Key หรือยัง
-        if not GENAI_API_KEY:
-            return "Config Error|0|API Key missing in Render Env"
-
-        image_data = request.form.get('image')
-        temp = request.form.get('temp', '25')
-        hum = request.form.get('hum', '60')
-
-        if not image_data:
-            return "Error|0|No Image Sent"
-
-        # แปลงรูปภาพ
-        try:
-            if "," in image_data:
-                image_data = image_data.split(",")[1]
-            image_data = image_data.replace(' ', '+')
-            missing_padding = len(image_data) % 4
-            if missing_padding:
-                image_data += '=' * (4 - missing_padding)
-            
-            image_bytes = base64.b64decode(image_data)
-            image = Image.open(io.BytesIO(image_bytes))
-        except Exception as e:
-            print(f"Image Error: {e}")
-            return f"Error|0|Image Corrupted"
-
-        try:
-            model = genai.GenerativeModel(model_name)
-        except Exception as e:
-             return f"Error|0|Model Setup Fail"
-
-        # สั่ง Gemini ให้วิเคราะห์ (เวอร์ชันใหม่ บังคับตอบสั้น)
-        prompt = f"""
-        You are a sourdough expert. Analyze this image of a starter.
-        Current Environment: Temperature {temp}°C, Humidity {hum}%.
-        
-        Strictly return the response in this format ONLY (use pipe '|' separator):
-        Status|TimeRemaining(mins)|ShortAdvice
-
-        Status options: 'Feeding Needed', 'Rising', 'Peak/Ready', 'Over-fermented', 'Moldy/Bad'.
-        TimeRemaining: Estimate minutes until ready (put 0 if ready or bad).
-        ShortAdvice: ONE SHORT SENTENCE. Max 6 words. No symbols.
+        # Prompt สั่งให้ตอบสถานะชัดๆ
+        prompt = """
+        Analyze this sourdough starter image.
+        Classify status strictly as one of: Ready, Peak, Hungry, Moldy, Sleepy.
+        Return format: "Status: [Status] - [Short Advice]"
+        Example: "Status: Ready - Perfect for baking!"
         """
         
-        print(f"Sending to model: {model_name}")
-        response = model.generate_content([prompt, image])
-        text_response = response.text.strip()
+        response = model.generate_content([
+            prompt,
+            {"mime_type": "image/jpeg", "data": file.read()}
+        ])
         
-        text_response = text_response.replace('```', '').replace('python', '').replace('text', '').strip()
-        
-        # --- เพิ่มส่วนนี้: หั่นข้อความให้สั้นจู๋ เพื่อกัน ESP32 น็อค ---
-        if "|" in text_response:
-            parts = text_response.split('|')
-            if len(parts) >= 3:
-                status = parts[0]
-                time = parts[1]
-                advice = parts[2]
-                
-                # ตัดให้เหลือแค่ 15 ตัวอักษรพอ (กันเหนียวสุดๆ)
-                if len(advice) > 15:
-                    advice = advice[:15] + "..."
-                
-                text_response = f"{status}|{time}|{advice}"
-        # ----------------------------------------------------
+        result_text = response.text.strip()
+        print(f"AI Analysis: {result_text}")
 
-        print(f"AI Says: {text_response}")
-        return text_response
+        # --- 4. เงื่อนไขการส่งไลน์ ---
+        # ส่งไลน์เฉพาะถ้า "พร้อมใช้" (Ready/Peak) หรือ "มีปัญหา" (Moldy)
+        if "Ready" in result_text or "Peak" in result_text or "Moldy" in result_text:
+            
+            # แต่งข้อความให้น่ารัก
+            emoji = "🍞"
+            if "Moldy" in result_text: emoji = "⚠️ ตรวจพบเชื้อรา!"
+            if "Ready" in result_text or "Peak" in result_text: emoji = "✅ น้องพร้อมแล้ว!"
+            
+            # ส่งข้อความเข้ามือถือคุณ
+            msg = f"{emoji}\nผลวิเคราะห์: {result_text}\n(รีบไปดูที่ตู้ด่วน!)"
+            send_line_message(msg)
+            
+        return result_text
 
     except Exception as e:
-        error_msg = str(e)
-        print(f"CRITICAL ERROR: {traceback.format_exc()}")
-        
-        if "403" in error_msg:
-            return "Key Error|0|API Key Invalid or Leaked"
-        if "404" in error_msg:
-            return "Model Error|0|Model not found"
-        if "429" in error_msg:
-            return "Quota Error|0|Too many requests"
-            
-        return f"Sys Error|0|Check Logs"
+        print(f"Error: {e}")
+        return f"Error: {e}", 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
-
-
-
