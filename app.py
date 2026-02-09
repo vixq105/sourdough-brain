@@ -12,7 +12,7 @@ LINE_TOKEN = os.environ.get("LINE_CHANNEL_TOKEN")
 LINE_USER = os.environ.get("LINE_USER_ID")
 
 MODELS_TO_TRY = [
-    "gemini-1.5-flash"
+    "gemini-2.0-flash"
 ]
 
 # ========= LINE =========
@@ -114,4 +114,5 @@ def analyze():
 # ========= RUN =========
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000, debug=True)
+
 
