@@ -7,98 +7,93 @@ from flask import Flask, request
 
 app = Flask(__name__)
 
-# --- 1. ตั้งค่ากุญแจ ---
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+# --- 1. หา Key แบบกันพลาด (ลองทั้ง 2 ชื่อ) ---
+# ลองดึงชื่อแรก
+API_KEY = os.environ.get("GEMINI_API_KEY")
+# ถ้าไม่มี ลองดึงชื่อที่สอง (เผื่อคุณตั้งชื่อนี้ไว้)
+if not API_KEY:
+    API_KEY = os.environ.get("GENAI_API_KEY")
+
 LINE_CHANNEL_TOKEN = os.environ.get("LINE_CHANNEL_TOKEN")
 LINE_USER_ID = os.environ.get("LINE_USER_ID")
 
-# --- 2. ฟังก์ชันส่ง LINE ---
-def send_line_alert(message):
+def send_line_alert(msg):
     if not LINE_CHANNEL_TOKEN or not LINE_USER_ID: return
-    url = 'https://api.line.me/v2/bot/message/push'
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Bearer {LINE_CHANNEL_TOKEN}'
-    }
-    data = {
-        "to": LINE_USER_ID,
-        "messages": [{"type": "text", "text": message}]
-    }
-    try: requests.post(url, headers=headers, data=json.dumps(data))
+    try:
+        url = 'https://api.line.me/v2/bot/message/push'
+        headers = {'Content-Type': 'application/json', 'Authorization': f'Bearer {LINE_CHANNEL_TOKEN}'}
+        data = {"to": LINE_USER_ID, "messages": [{"type": "text", "text": msg}]}
+        requests.post(url, headers=headers, data=json.dumps(data))
     except: pass
 
 @app.route('/')
 def home():
-    return "Sourdough Direct-API Mode Running!"
+    if not API_KEY:
+        return "Warning: API KEY Missing in Render!"
+    return f"Direct API Mode (Key found: {API_KEY[:5]}...)"
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
-    print("--- New Direct Request ---")
+    print("--- Direct API Request ---")
     
-    # 1. รับรูปจาก ESP32
+    # 1. เช็ค Key ก่อนเลย
+    if not API_KEY:
+        return "Error|0|Key Missing in Server"
+
+    # 2. เช็ครูป
     if 'imageFile' not in request.files:
         return "Error|0|No Image Sent"
     
     file = request.files['imageFile']
     
     try:
-        # แปลงรูปเป็นรหัส Base64 (เพื่อส่งแนบจดหมายไปหา Google)
+        # เตรียมข้อมูล
         image_bytes = file.read()
         image_b64 = base64.b64encode(image_bytes).decode('utf-8')
 
-        # --- 3. ยิงตรงไปหา Google (ไม่ผ่าน Library) ---
-        # ใช้โมเดล gemini-1.5-flash ได้แน่นอน เพราะเราเรียก URL โดยตรง
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-        
+        # ยิงไปที่ Google (ใช้ 1.5-flash)
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={API_KEY}"
         headers = {'Content-Type': 'application/json'}
-        
         payload = {
             "contents": [{
                 "parts": [
-                    {"text": "Analyze this sourdough starter. Return strictly ONE line: Status|TimeRemaining(mins)|ShortAdvice. Status options: Ready, Peak, Hungry, Moldy, Sleepy. Example: Ready|0|Bake now"},
-                    {
-                        "inline_data": {
-                            "mime_type": "image/jpeg",
-                            "data": image_b64
-                        }
-                    }
+                    {"text": "Analyze sourdough. Return strictly ONE line: Status|Time(mins)|Advice. Status: Ready, Peak, Hungry, Moldy. Example: Ready|0|Bake now"},
+                    {"inline_data": {"mime_type": "image/jpeg", "data": image_b64}}
                 ]
             }]
         }
 
-        # ส่งข้อมูลออกไป
+        # ส่ง request
+        print("Sending to Google...")
         response = requests.post(api_url, headers=headers, json=payload)
         response_json = response.json()
 
-        # เช็คว่ามี Error จาก Google ไหม
+        # --- 3. จุดตัดสินสำคัญ: เช็ค Error จาก Google ---
         if 'error' in response_json:
-            print(f"Google API Error: {response_json['error']}")
-            return f"Error|0|API Error"
-
-        # ดึงคำตอบออกมา
-        try:
-            result_text = response_json['candidates'][0]['content']['parts'][0]['text']
-            result_text = result_text.strip().replace('\n', '').replace('```', '')
-            print(f"AI Says: {result_text}")
-        except:
-            return "Error|0|Bad AI Response"
-
-        # --- 4. ส่ง LINE ---
-        if any(x in result_text for x in ["Ready", "Peak", "Moldy"]):
-            emoji = "🍞"
-            if "Moldy" in result_text: emoji = "⚠️ ราขึ้น!"
-            elif "Ready" in result_text or "Peak" in result_text: emoji = "✅ ฟูสวยแล้ว!"
+            error_msg = response_json['error'].get('message', 'Unknown Error')
+            print(f"GOOGLE REFUSED: {error_msg}")
             
-            parts = result_text.split('|')
-            status_show = parts[0] if len(parts) > 0 else result_text
-            
-            send_line_alert(f"{emoji}\nสถานะ: {status_show}\n(ไปดูน้องด่วน!)")
+            # ส่ง Error จริงกลับไปโชว์ที่จอ ESP32 (ตัดให้สั้นลง)
+            short_err = error_msg[:20] 
+            return f"Error|0|{short_err}"
 
-        return result_text
+        # ถ้าผ่าน
+        if 'candidates' in response_json:
+            result = response_json['candidates'][0]['content']['parts'][0]['text']
+            result = result.strip().replace('\n', '').replace('*', '')
+            print(f"Success: {result}")
+            
+            # ส่งไลน์
+            if any(x in result for x in ["Ready", "Peak", "Moldy"]):
+                 send_line_alert(f"🍞 ผลการตรวจ: {result}")
+            
+            return result
+        else:
+            return "Error|0|No Answer from AI"
 
     except Exception as e:
-        print(f"System Error: {traceback.format_exc()}")
-        return f"Error|0|System Fail"
+        print(traceback.format_exc())
+        return f"Error|0|Sys: {str(e)[:15]}"
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
