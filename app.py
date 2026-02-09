@@ -7,7 +7,8 @@ from flask import Flask, request
 
 app = Flask(__name__)
 
-# --- 1. หา Key แบบกันพลาด ---
+# --- 1. ตั้งค่ากุญแจ ---
+# พยายามหา Key ทุกชื่อที่เป็นไปได้
 API_KEY = os.environ.get("GEMINI_API_KEY")
 if not API_KEY:
     API_KEY = os.environ.get("GENAI_API_KEY")
@@ -27,11 +28,11 @@ def send_line_alert(msg):
 @app.route('/')
 def home():
     if not API_KEY: return "Warning: NO API KEY"
-    return "Sourdough Direct-API (v1.5-001) Running!"
+    return "Sourdough Monitor (v1.5 PRO) Running!"
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
-    print("--- Request (Full Version ID) ---")
+    print("--- Request (Gemini 1.5 Pro) ---")
     
     if not API_KEY: return "Error|0|Key Missing"
     if 'imageFile' not in request.files: return "Error|0|No Image"
@@ -39,39 +40,39 @@ def analyze():
     file = request.files['imageFile']
     
     try:
+        # แปลงรูปเป็น Base64
         image_b64 = base64.b64encode(file.read()).decode('utf-8')
 
-        # ⚠️ จุดแก้สำคัญ: ใช้ชื่อเต็ม 'gemini-1.5-flash-001'
-        api_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-001:generateContent"
+        # ⚠️ เปลี่ยนมาใช้ 'gemini-1.5-pro' (ตัวท็อปสุด)
+        # ใช้ v1beta endpoint ที่รองรับ free tier ได้ดีกว่า
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={API_KEY}"
         
-        # ⚠️ จุดแก้สำคัญ: ย้าย Key มาใส่ใน Header (x-goog-api-key)
-        headers = {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': API_KEY
-        }
+        headers = {'Content-Type': 'application/json'}
         
         payload = {
             "contents": [{
                 "parts": [
-                    {"text": "Analyze sourdough image. Return strictly ONE line: Status|Time(mins)|Advice. Status: Ready, Peak, Hungry, Moldy. Example: Ready|0|Bake now"},
-                    {"inline_data": {"mime_type": "image/jpeg", "data": image_b64}}
+                    {"text": "Analyze this sourdough starter image. Return strictly ONE line: Status|TimeRemaining(mins)|ShortAdvice. Status options: Ready, Peak, Hungry, Moldy, Sleepy. Example: Ready|0|Bake now"},
+                    {
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": image_b64
+                        }
+                    }
                 ]
             }]
         }
 
-        print(f"Sending to: {api_url}...")
+        print("Sending to Gemini 1.5 Pro...")
         response = requests.post(api_url, headers=headers, json=payload)
         response_json = response.json()
 
-        # เช็ค Error แบบละเอียด
+        # เช็ค Error จาก Google
         if 'error' in response_json:
             err_msg = response_json['error'].get('message', 'Unknown')
-            print(f"Google Error: {err_msg}")
+            print(f"GOOGLE ERROR: {err_msg}")
             
-            # ถ้ายังหา 1.5-flash-001 ไม่เจอ ให้ลองถอยไป 1.5-pro (ยอมช้านิดนึงแต่ชัวร์)
-            if "not found" in err_msg or "404" in str(response.status_code):
-                 return "Error|0|Try gemini-1.5-pro"
-            
+            # ส่ง Error กลับไปโชว์ที่จอ (เช่น API Key หมดอายุ, หรือยังไม่เปิดใช้ API)
             return f"Error|0|{err_msg[:20]}"
 
         # ดึงคำตอบ
@@ -80,6 +81,7 @@ def analyze():
             result = result.strip().replace('\n', '').replace('*', '')
             print(f"Success: {result}")
             
+            # ส่ง LINE ถ้าจำเป็น
             if any(x in result for x in ["Ready", "Peak", "Moldy"]):
                  send_line_alert(f"🍞 {result}")
             
