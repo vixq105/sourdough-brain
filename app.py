@@ -129,7 +129,7 @@ def analyze():
         status = result.split("|")[0] if "|" in result else "Unknown"
 
         # --- แจ้ง LINE เฉพาะตอนสถานะเปลี่ยน และเป็นสถานะสำคัญ ---
-        if status in ["Ready", "Peak", "Moldy"] and status != last_status:
+        if status in ["Ready", "Peak", "Moldy","Hungry"] and status != last_status:
             send_line(
                 "🍞 Sourdough Alert\n"
                 f"{result}\n"
@@ -147,4 +147,5 @@ def analyze():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
 
