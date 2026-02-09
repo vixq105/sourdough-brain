@@ -1,30 +1,20 @@
 import os
 import requests
 import json
+import base64
 import traceback
-import google.generativeai as genai
 from flask import Flask, request
 
 app = Flask(__name__)
 
-# --- 1. ตั้งค่ากุญแจ (ดึงจาก Render Environment) ---
+# --- 1. ตั้งค่ากุญแจ ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 LINE_CHANNEL_TOKEN = os.environ.get("LINE_CHANNEL_TOKEN")
 LINE_USER_ID = os.environ.get("LINE_USER_ID")
 
-# ตั้งค่า AI
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-
-# ⚠️ ใช้ตัวนี้ครับ! มีมานานแล้ว รับรอง Server รู้จักแน่นอน
-MODEL_NAME = 'gemini-pro'
-
-# --- 2. ฟังก์ชันส่ง LINE (ส่งเฉพาะตอนสำคัญ) ---
+# --- 2. ฟังก์ชันส่ง LINE ---
 def send_line_alert(message):
-    if not LINE_CHANNEL_TOKEN or not LINE_USER_ID:
-        print("LINE keys missing, skipping.")
-        return
-
+    if not LINE_CHANNEL_TOKEN or not LINE_USER_ID: return
     url = 'https://api.line.me/v2/bot/message/push'
     headers = {
         'Content-Type': 'application/json',
@@ -34,19 +24,16 @@ def send_line_alert(message):
         "to": LINE_USER_ID,
         "messages": [{"type": "text", "text": message}]
     }
-    try:
-        requests.post(url, headers=headers, data=json.dumps(data))
-        print("LINE Sent!")
-    except Exception as e:
-        print(f"LINE Error: {e}")
+    try: requests.post(url, headers=headers, data=json.dumps(data))
+    except: pass
 
 @app.route('/')
 def home():
-    return f"Sourdough Monitor (Classic Model: {MODEL_NAME}) Running!"
+    return "Sourdough Direct-API Mode Running!"
 
 @app.route('/analyze', methods=['POST'])
 def analyze():
-    print("--- New Request Incoming ---")
+    print("--- New Direct Request ---")
     
     # 1. รับรูปจาก ESP32
     if 'imageFile' not in request.files:
@@ -55,62 +42,63 @@ def analyze():
     file = request.files['imageFile']
     
     try:
-        # 2. เรียกใช้ Gemini Pro (ตัวเสถียร)
-        model = genai.GenerativeModel(MODEL_NAME)
-        
-        # คำสั่ง (Prompt) - ย้ำเรื่องรูปแบบคำตอบ
-        prompt = """
-        You are a Sourdough Expert. Analyze this image of a starter.
-        
-        STRICTLY return ONE line in this format using pipe '|' separator:
-        Status|TimeRemaining(mins)|ShortAdvice
+        # แปลงรูปเป็นรหัส Base64 (เพื่อส่งแนบจดหมายไปหา Google)
+        image_bytes = file.read()
+        image_b64 = base64.b64encode(image_bytes).decode('utf-8')
 
-        Status options: Ready, Peak, Hungry, Moldy, Sleepy.
-        TimeRemaining: integer minutes (put 0 if ready/bad).
-        ShortAdvice: Max 6 words.
+        # --- 3. ยิงตรงไปหา Google (ไม่ผ่าน Library) ---
+        # ใช้โมเดล gemini-1.5-flash ได้แน่นอน เพราะเราเรียก URL โดยตรง
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
         
-        Example: Ready|0|Bake immediately!
-        """
+        headers = {'Content-Type': 'application/json'}
         
-        # ส่งรูปภาพ
-        response = model.generate_content([
-            prompt,
-            {"mime_type": "image/jpeg", "data": file.read()}
-        ])
-        
-        # คลีนข้อมูลคำตอบ (ลบพวก markdown ที่ AI ชอบแถมมา)
-        result_text = response.text.strip()
-        result_text = result_text.replace('```', '').replace('*', '').replace('\n', '')
-        
-        print(f"AI Says: {result_text}")
+        payload = {
+            "contents": [{
+                "parts": [
+                    {"text": "Analyze this sourdough starter. Return strictly ONE line: Status|TimeRemaining(mins)|ShortAdvice. Status options: Ready, Peak, Hungry, Moldy, Sleepy. Example: Ready|0|Bake now"},
+                    {
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": image_b64
+                        }
+                    }
+                ]
+            }]
+        }
 
-        # --- 3. ตรรกะการส่ง LINE ---
-        # ส่งไลน์ถ้าสถานะคือ: Ready, Peak, หรือ Moldy
-        if any(status in result_text for status in ["Ready", "Peak", "Moldy"]):
+        # ส่งข้อมูลออกไป
+        response = requests.post(api_url, headers=headers, json=payload)
+        response_json = response.json()
+
+        # เช็คว่ามี Error จาก Google ไหม
+        if 'error' in response_json:
+            print(f"Google API Error: {response_json['error']}")
+            return f"Error|0|API Error"
+
+        # ดึงคำตอบออกมา
+        try:
+            result_text = response_json['candidates'][0]['content']['parts'][0]['text']
+            result_text = result_text.strip().replace('\n', '').replace('```', '')
+            print(f"AI Says: {result_text}")
+        except:
+            return "Error|0|Bad AI Response"
+
+        # --- 4. ส่ง LINE ---
+        if any(x in result_text for x in ["Ready", "Peak", "Moldy"]):
             emoji = "🍞"
-            if "Moldy" in result_text: emoji = "⚠️ อันตราย!"
-            elif "Ready" in result_text or "Peak" in result_text: emoji = "✅ น้องฟูแล้ว!"
+            if "Moldy" in result_text: emoji = "⚠️ ราขึ้น!"
+            elif "Ready" in result_text or "Peak" in result_text: emoji = "✅ ฟูสวยแล้ว!"
             
-            # ตัดคำให้สวยงาม
             parts = result_text.split('|')
             status_show = parts[0] if len(parts) > 0 else result_text
-            advice_show = parts[2] if len(parts) > 2 else ""
             
-            line_msg = f"{emoji}\nสถานะ: {status_show}\nแนะนำ: {advice_show}\n(รีบไปดูที่ตู้ด่วน!)"
-            send_line_alert(line_msg)
-        
-        # ส่งค่ากลับไปโชว์บนหน้าจอ ESP32
+            send_line_alert(f"{emoji}\nสถานะ: {status_show}\n(ไปดูน้องด่วน!)")
+
         return result_text
 
     except Exception as e:
-        print(f"Error: {traceback.format_exc()}")
-        err_msg = str(e)
-        
-        # ดักจับ Error เพื่อบอก user ง่ายๆ
-        if "404" in err_msg: return "Error|0|Model Not Found"
-        if "429" in err_msg: return "Error|0|Quota Exceeded"
-        
-        return "Error|0|System Fail"
+        print(f"System Error: {traceback.format_exc()}")
+        return f"Error|0|System Fail"
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
