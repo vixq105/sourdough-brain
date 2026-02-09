@@ -6,114 +6,144 @@ from flask import Flask, request
 
 app = Flask(__name__)
 
-# ========= CONFIG =========
-API_KEY = os.environ.get("GEMINI_API_KEY")
-LINE_TOKEN = os.environ.get("LINE_CHANNEL_TOKEN")
-LINE_USER = os.environ.get("LINE_USER_ID")
+# ================= CONFIG =================
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+LINE_CHANNEL_TOKEN = os.environ.get("LINE_CHANNEL_TOKEN")
+LINE_USER_ID = os.environ.get("LINE_USER_ID")
 
-MODELS_TO_TRY = [
-    "gemini-2.5-flash"
-]
+# ใช้เฉพาะโมเดลฟรีที่ชัวร์
+GEMINI_MODEL = "gemini-1.5-flash"
 
-# ========= LINE =========
-def send_line(msg):
-    if not LINE_TOKEN or not LINE_USER:
+# เก็บสถานะล่าสุด กันแจ้งซ้ำ
+last_status = None
+# =========================================
+
+
+# ================= LINE ===================
+def send_line(msg: str):
+    if not LINE_CHANNEL_TOKEN or not LINE_USER_ID:
+        print("LINE config missing")
         return
+
     try:
         requests.post(
             "https://api.line.me/v2/bot/message/push",
             headers={
-                "Authorization": f"Bearer {LINE_TOKEN}",
+                "Authorization": f"Bearer {LINE_CHANNEL_TOKEN}",
                 "Content-Type": "application/json"
             },
             json={
-                "to": LINE_USER,
+                "to": LINE_USER_ID,
                 "messages": [{"type": "text", "text": msg}]
             },
             timeout=5
         )
-    except:
-        pass
+    except Exception as e:
+        print("LINE error:", e)
+# =========================================
 
-# ========= ROUTES =========
+
 @app.route("/")
 def home():
-    return "Gemini Auto Switcher Running ✅"
+    return "🍞 Sourdough Brain Running"
 
+
+# ====== ใช้ทดสอบ LINE โดยไม่ต้อง ESP32 ======
+@app.route("/test-line")
+def test_line():
+    send_line("✅ LINE notification works!")
+    return "ok"
+
+
+# ================= ANALYZE =================
 @app.route("/analyze", methods=["POST"])
 def analyze():
-    print("\n--- New Request ---")
+    global last_status
 
-    if not API_KEY:
-        return "Error|0|Missing API Key"
+    print("\n--- New Analyze Request ---")
+
+    if not GEMINI_API_KEY:
+        return "Error|0|NoGeminiKey"
 
     if "imageFile" not in request.files:
-        return "Error|0|No Image"
+        return "Error|0|NoImage"
 
     try:
+        # --- เตรียมรูป ---
         img = request.files["imageFile"]
         img_b64 = base64.b64encode(img.read()).decode()
 
-        last_error = "Unknown"
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/"
+            f"models/{GEMINI_MODEL}:generateContent"
+            f"?key={GEMINI_API_KEY}"
+        )
 
-        for model in MODELS_TO_TRY:
-            print(f"Trying model: {model}")
-
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={API_KEY}"
-
-            payload = {
-                "contents": [{
-                    "role": "user",
-                    "parts": [
-                        {
-                            "text": (
-                                "Analyze sourdough starter image.\n"
-                                "Return STRICTLY one line:\n"
-                                "Status|Time(mins)|Advice\n"
-                                "Status must be one of: Ready, Peak, Hungry, Moldy\n"
-                                "Example: Ready|0|Bake now"
-                            )
-                        },
-                        {
-                            "inline_data": {
-                                "mime_type": "image/jpeg",
-                                "data": img_b64
-                            }
+        payload = {
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    {
+                        "text": (
+                            "Analyze sourdough starter image.\n"
+                            "Return STRICTLY ONE LINE ONLY:\n"
+                            "Status|Time(mins)|Advice\n"
+                            "Status must be one of: Ready, Peak, Hungry, Moldy\n"
+                            "Example: Ready|0|Bake now\n"
+                            "Do not add any extra text."
+                        )
+                    },
+                    {
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": img_b64
                         }
-                    ]
-                }]
-            }
+                    }
+                ]
+            }]
+        }
 
-            r = requests.post(url, json=payload, timeout=20)
-            data = r.json()
+        resp = requests.post(url, json=payload, timeout=30)
 
-            if r.status_code != 200:
-                print("HTTP", r.status_code, data)
-                last_error = data.get("error", {}).get("message", "HTTP error")
-                continue
+        # --- Quota หมด ---
+        if resp.status_code == 429:
+            print("Gemini quota exceeded")
+            return "Error|0|GeminiQuota"
 
-            try:
-                text = data["candidates"][0]["content"]["parts"][0]["text"]
-                text = text.strip().replace("\n", "").replace("*", "")
-                print(f"SUCCESS ({model}):", text)
+        data = resp.json()
 
-                if any(x in text for x in ["Ready", "Peak", "Moldy"]):
-                    send_line(f"🍞 {model}\n{text}")
+        if "error" in data:
+            print("Gemini error:", data["error"])
+            return "Error|0|GeminiError"
 
-                return text
-            except Exception:
-                last_error = "Bad response format"
-                continue
+        result = (
+            data["candidates"][0]["content"]["parts"][0]["text"]
+            .strip()
+            .replace("\n", "")
+            .replace("*", "")
+        )
 
-        return f"Error|0|{last_error[:25]}"
+        print("Gemini result:", result)
 
-    except Exception as e:
+        # --- แยกสถานะ ---
+        status = result.split("|")[0] if "|" in result else "Unknown"
+
+        # --- แจ้ง LINE เฉพาะตอนสถานะเปลี่ยน และเป็นสถานะสำคัญ ---
+        if status in ["Ready", "Peak", "Moldy"] and status != last_status:
+            send_line(
+                "🍞 Sourdough Alert\n"
+                f"{result}\n"
+                f"(model: {GEMINI_MODEL})"
+            )
+            last_status = status
+
+        return result
+
+    except Exception:
         print(traceback.format_exc())
-        return f"Error|0|{str(e)[:25]}"
+        return "Error|0|ServerError"
+# =========================================
 
-# ========= RUN =========
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000, debug=True)
-
-
-
+    app.run(host="0.0.0.0", port=10000)
