@@ -12,7 +12,7 @@ LINE_CHANNEL_TOKEN = os.environ.get("LINE_CHANNEL_TOKEN")
 LINE_USER_ID = os.environ.get("LINE_USER_ID")
 
 # ใช้เฉพาะโมเดลฟรีที่ชัวร์
-GEMINI_MODEL = "gemini-1.5-flash"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 # เก็บสถานะล่าสุด กันแจ้งซ้ำ
 last_status = None
@@ -147,3 +147,4 @@ def analyze():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
