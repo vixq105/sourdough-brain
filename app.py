@@ -131,9 +131,8 @@ def analyze():
         # --- แจ้ง LINE เฉพาะตอนสถานะเปลี่ยน และเป็นสถานะสำคัญ ---
         if status in ["Ready", "Peak", "Moldy","Hungry"] and status != last_status:
             send_line(
-                "🍞 Sourdough Alert\n"
+                "🍞 Starter Alert\n"
                 f"{result}\n"
-                f"(model: {GEMINI_MODEL})"
             )
             last_status = status
 
@@ -147,5 +146,6 @@ def analyze():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
 
 
