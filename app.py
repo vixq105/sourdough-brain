@@ -126,31 +126,39 @@ def analyze():
         print("Gemini result:", result)
 
         # --- แยกสถานะและคำแนะนำ ---
+        # --- แยกสถานะและคำแนะนำ ---
         parts = result.split("|")
         status = parts[0] if len(parts) > 0 else "Unknown"
-        advice = parts[2] if len(parts) > 2 else "" # ดึงคำแนะนำมาใช้ด้วย
+        advice = parts[2] if len(parts) > 2 else ""
 
         # --- แจ้ง LINE เฉพาะตอนสถานะเปลี่ยน และเป็นสถานะสำคัญ ---
         if status in ["Ready", "Peak", "Moldy","Hungry"] and status != last_status:
             
-            # จัดฟอร์แมตข้อความที่จะส่งเข้า LINE ใหม่ ให้สวยงาม ไม่มี |0|
             if status == "Ready" or status == "Peak":
-                line_msg = f"🍞 Starter is {status}!\n💡 {advice}"
+                line_msg = f"🍞 Starter is {status}!\n💡 AI แนะนำ: {advice}"
             elif status == "Hungry":
-                line_msg = f"🥣 Starter is hungry!\n💡 {advice}"
+                line_msg = f"🥣 Starter is hungry!\n💡 AI แนะนำ: {advice}"
             elif status == "Moldy":
-                line_msg = f"⚠️ ระวัง! Starter is moldy (เชื้อราขึ้น)!\n💡  {advice}"
+                line_msg = f"⚠️ ระวัง! Starter is moldy (เชื้อราขึ้น)!\n💡 AI แนะนำ: {advice}"
             else:
                 line_msg = f"Starter status: {status}"
 
-            # สั่งส่งข้อความที่จัดสวยแล้วเข้า LINE
             send_line(line_msg)
             last_status = status
+
+        # ต้องมี return result คืนค่ากลับไปให้ ESP32 ด้วย
+        return result
+
+    # บล็อก except ที่หายไป เอามาใส่คืนตรงนี้ครับ (ให้เยื้องตรงกับคำว่า try: ด้านบน)
+    except Exception:
+        print(traceback.format_exc())
+        return "Error|0|ServerError"
 # =========================================
 
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
 
 
 
