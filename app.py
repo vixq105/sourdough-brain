@@ -130,7 +130,20 @@ def analyze():
 
         # --- แจ้ง LINE เฉพาะตอนสถานะเปลี่ยน และเป็นสถานะสำคัญ ---
         if status in ["Ready", "Peak", "Moldy", "Hungry"] and status != last_status:
-            send_line(f"{result}\n")
+            
+            # แปลงสถานะเป็นข้อความสวยๆ
+            if status == "Ready":
+                line_msg = "🍞 Starter is ready!"
+            elif status == "Peak":
+                line_msg = "📈 Starter is at its peak!"
+            elif status == "Hungry":
+                line_msg = "🥣 Starter is hungry!"
+            elif status == "Moldy":
+                line_msg = "⚠️ ระวัง! Starter is moldy!"
+            else:
+                line_msg = f"Status: {status}"
+
+            send_line(line_msg)
             last_status = status
 
         return result
