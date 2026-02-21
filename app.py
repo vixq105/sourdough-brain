@@ -125,27 +125,33 @@ def analyze():
 
         print("Gemini result:", result)
 
-        # --- แยกสถานะ ---
-        status = result.split("|")[0] if "|" in result else "Unknown"
+        # --- แยกสถานะและคำแนะนำ ---
+        parts = result.split("|")
+        status = parts[0] if len(parts) > 0 else "Unknown"
+        advice = parts[2] if len(parts) > 2 else "" # ดึงคำแนะนำมาใช้ด้วย
 
         # --- แจ้ง LINE เฉพาะตอนสถานะเปลี่ยน และเป็นสถานะสำคัญ ---
         if status in ["Ready", "Peak", "Moldy","Hungry"] and status != last_status:
-            send_line(
-                "🍞 Starter Alert\n"
-                f"{result}\n"
-            )
+            
+            # จัดฟอร์แมตข้อความที่จะส่งเข้า LINE ใหม่ ให้สวยงาม ไม่มี |0|
+            if status == "Ready" or status == "Peak":
+                line_msg = f"🍞 Starter is {status}!\n💡 {advice}"
+            elif status == "Hungry":
+                line_msg = f"🥣 Starter is hungry!\n💡 {advice}"
+            elif status == "Moldy":
+                line_msg = f"⚠️ ระวัง! Starter is moldy (เชื้อราขึ้น)!\n💡  {advice}"
+            else:
+                line_msg = f"Starter status: {status}"
+
+            # สั่งส่งข้อความที่จัดสวยแล้วเข้า LINE
+            send_line(line_msg)
             last_status = status
-
-        return result
-
-    except Exception:
-        print(traceback.format_exc())
-        return "Error|0|ServerError"
 # =========================================
 
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
 
 
 
