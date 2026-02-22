@@ -126,7 +126,7 @@ def analyze():
         print("Gemini result:", result)
 
         # --- แยกสถานะ ---
-        status = result.split("|")[0] if "|" in result else "Unknown"
+        status = result.split("|")[0].strip() if "|" in result else "Unknown"
 
         # --- แจ้ง LINE เฉพาะตอนสถานะเปลี่ยน และเป็นสถานะสำคัญ ---
         if status in ["Ready", "Peak", "Moldy", "Hungry"] and status != last_status:
@@ -156,3 +156,4 @@ def analyze():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
+
