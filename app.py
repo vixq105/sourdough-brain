@@ -155,6 +155,8 @@ def analyze():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    # ให้ดึง Port จาก Render มาใช้ ถ้าไม่มีให้ใช้ 10000 แทน
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
 
